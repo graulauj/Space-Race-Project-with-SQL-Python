@@ -1,0 +1,320 @@
+!pip3 install folium
+!pip3 install wget
+
+import folium
+import wget
+import pandas as pd
+
+# Import folium MarkerCluster plugin
+from folium.plugins import MarkerCluster
+# Import folium MousePosition plugin
+from folium.plugins import MousePosition
+# Import folium DivIcon plugin
+from folium.features import DivIcon
+
+# Download and read the `spacex_launch_geo.csv`
+spacex_csv_file = wget.download('https://cf-courses-data.s3.us.cloud-object-storage.appdomain.cloud/IBM-DS0321EN-SkillsNetwork/datasets/spacex_launch_geo.csv')
+spacex_df=pd.read_csv(spacex_csv_file)
+
+# Select relevant sub-columns: `Launch Site`, `Lat(Latitude)`, `Long(Longitude)`, `class`
+spacex_df = spacex_df[['Launch Site', 'Lat', 'Long', 'class']]
+launch_sites_df = spacex_df.groupby(['Launch Site'], as_index=False).first()
+launch_sites_df = launch_sites_df[['Launch Site', 'Lat', 'Long', 'class']]
+launch_sites_df
+
+# Start location is NASA Johnson Space Center
+nasa_coordinate = [29.559684888503615, -95.0830971930759]
+site_map = folium.Map(location=nasa_coordinate, zoom_start=10)
+
+# Create a blue circle at NASA Johnson Space Center's coordinate with a popup label showing its name
+circle = folium.Circle(nasa_coordinate, radius=1000, color='#007fd3', fill=True).add_child(folium.Popup('NASA Johnson Space Center'))
+# Create a blue circle at NASA Johnson Space Center's coordinate with a icon showing its name
+marker = folium.map.Marker(
+    nasa_coordinate,
+    # Create an icon as a text label
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#007fd3;"><b>%s</b></div>' % 'NASA JSC',
+        )
+    )
+site_map.add_child(circle)
+site_map.add_child(marker)
+
+# Initial the map
+site_map = folium.Map(location=nasa_coordinate, zoom_start=5)
+# For each launch site, add a Circle object based on its coordinate (Lat, Long) values. In addition, add Launch site name as a popup label
+for lat, lng, label in zip(launch_sites_df['Lat'], launch_sites_df['Long'], launch_sites_df['Launch Site']):
+    coordinate = [lat, lng]
+    circle = folium.Circle(coordinate, radius=1000, color='#d35400', fill=True).add_child(folium.Popup(label))
+    marker = folium.map.Marker(
+        coordinate, 
+        icon=DivIcon(
+            icon_size=(20,20),
+            icon_anchor=(0,0), 
+            html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % label, 
+            )
+        )
+    site_map.add_child(circle)
+    site_map.add_child(marker)
+
+site_map
+
+spacex_df.tail(10)
+
+marker_cluster = MarkerCluster()
+
+# Apply a function to check the value of `class` column
+# If class=1, marker_color value will be green
+# If class=0, marker_color value will be red
+def assign_marker_color_LSDF(launch_class):
+    if launch_class == 1:
+        return 'green'
+    else:
+        return 'red'
+
+launch_sites_df['marker_color'] = launch_sites_df['class'].apply(assign_marker_color_LSDF)
+launch_sites_df
+
+# Function to assign color to launch outcome
+def assign_marker_color(launch_outcome):
+    if launch_outcome == 1:
+        return 'green'
+    else:
+        return 'red'
+    
+spacex_df['marker_color'] = spacex_df['class'].apply(assign_marker_color)
+spacex_df.tail(10)
+
+# Add marker_cluster to current site_map
+site_map.add_child(marker_cluster)
+
+# for each row in spacex_df data frame
+# create a Marker object with its coordinate
+# and customize the Marker's icon property to indicate if this launch was successed or failed, 
+# e.g., icon=folium.Icon(color='white', icon_color=row['marker_color']
+for lat, lng, label, color in zip(spacex_df['Lat'], spacex_df['Long'], spacex_df['Launch Site'], spacex_df['marker_color']):
+    # TODO: Create and add a Marker cluster to the site map
+    # marker = folium.Marker(...)
+    coordinate = [lat, lng]
+    marker = folium.Marker(
+        coordinate, 
+        icon=folium.Icon(color='white', icon_color=color),
+        popup=label
+    )
+    marker_cluster.add_child(marker)
+
+site_map
+
+# Add Mouse Position to get the coordinate (Lat, Long) for a mouse over on the map
+formatter = "function(num) {return L.Util.formatNum(num, 5);};"
+mouse_position = MousePosition(
+    position='topright',
+    separator=' Long: ',
+    empty_string='NaN',
+    lng_first=False,
+    num_digits=20,
+    prefix='Lat:',
+    lat_formatter=formatter,
+    lng_formatter=formatter,
+)
+
+site_map.add_child(mouse_position)
+site_map
+
+from math import sin, cos, sqrt, atan2, radians
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    # approximate radius of earth in km
+    R = 6373.0
+
+    lat1 = radians(lat1)
+    lon1 = radians(lon1)
+    lat2 = radians(lat2)
+    lon2 = radians(lon2)
+
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+
+    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    distance = R * c
+    return distance
+    
+# find coordinate of the closet coastline
+coastline_lat = 28.56398
+coastline_lon = -80.56809
+launch_site_lat = 28.56321
+launch_site_lon = -80.57683
+distance_coastline = calculate_distance(launch_site_lat, launch_site_lon, coastline_lat, coastline_lon)
+
+# Create and add a folium.Marker on your selected closest coastline point on the map
+# Display the distance between coastline point and launch site using the icon property 
+coast_coordinates = [coastline_lat, coastline_lon]
+distance_marker = folium.Marker(
+    coast_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_coastline),
+        )
+    )
+distance_marker.add_to(site_map)
+site_map
+
+# Create a `folium.PolyLine` object using the coastline coordinates and launch site coordinate
+launch_site_coordinates = [launch_site_lat, launch_site_lon]
+lines=folium.PolyLine(locations=[coast_coordinates, launch_site_coordinates], weight=1)
+site_map.add_child(lines)
+
+# Create a marker with distance to a closest city, railway, highway, etc.
+# Draw a line between the closest city(Titusville) to the launch site
+city_lat = 28.61208
+city_lon = -80.80764
+distance_city = calculate_distance(launch_site_lat, launch_site_lon, city_lat, city_lon)
+
+city_coordinates = [city_lat, city_lon]
+distance_marker = folium.Marker(
+    city_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_city),
+        )
+    )
+distance_marker.add_to(site_map)
+
+launch_site_coordinates = [launch_site_lat, launch_site_lon]
+lines=folium.PolyLine(locations=[city_coordinates, launch_site_coordinates], weight=1)
+site_map.add_child(lines)
+site_map
+
+# Draw a line between the closest railway to the launch site
+railway_lat = 28.57208
+railway_lon = -80.58527
+distance_railway = calculate_distance(launch_site_lat, launch_site_lon, railway_lat, railway_lon)
+
+railway_coordinates = [railway_lat, railway_lon]
+distance_marker = folium.Marker(
+    railway_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_railway),
+        )
+    )
+distance_marker.add_to(site_map)
+
+launch_site_coordinates = [launch_site_lat, launch_site_lon]
+lines=folium.PolyLine(locations=[railway_coordinates, launch_site_coordinates], weight=1)
+site_map.add_child(lines)
+site_map
+
+# Draw a line between the closest highway to the launch site
+highway_lat = 28.56478
+highway_lon = -80.57103
+distance_highway = calculate_distance(launch_site_lat, launch_site_lon, highway_lat, highway_lon)
+
+highway_coordinates = [highway_lat, highway_lon]
+distance_marker = folium.Marker(
+    highway_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_highway),
+        )
+    )
+distance_marker.add_to(site_map)
+
+launch_site_coordinates = [launch_site_lat, launch_site_lon]
+lines=folium.PolyLine(locations=[highway_coordinates, launch_site_coordinates], weight=1)
+site_map.add_child(lines)
+site_map
+
+# Draw a line between the closest city(Cape Canaveral) to the launch site
+city_2_lat = 28.40159
+city_2_lon = -80.6042
+distance_city_2 = calculate_distance(launch_site_lat, launch_site_lon, city_2_lat, city_2_lon)
+
+city_2_coordinates = [city_2_lat, city_2_lon]
+distance_marker = folium.Marker(
+    city_2_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_city_2),
+        )
+    )
+distance_marker.add_to(site_map)
+
+launch_site_coordinates = [launch_site_lat, launch_site_lon]
+lines=folium.PolyLine(locations=[city_2_coordinates, launch_site_coordinates], weight=1)
+site_map.add_child(lines)
+site_map
+
+# Draw a line between the closest city(Lompoc) to the launch site(Space Launch Complex 4)
+launch_site_4_lat = 34.63286
+launch_site_4_lon = -120.61074
+launch_site_4_coordinates = [launch_site_4_lat, launch_site_4_lon]
+
+city_Lompoc_lat = 34.63879
+city_Lompoc_lon = -120.45788
+distance_city_Lompoc = calculate_distance(launch_site_4_lat, launch_site_4_lon, city_Lompoc_lat, city_Lompoc_lon)
+
+city_Lompoc_coordinates = [city_Lompoc_lat, city_Lompoc_lon]
+
+distance_marker = folium.Marker(
+    city_Lompoc_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_city_Lompoc),
+        )
+    )
+distance_marker.add_to(site_map)
+
+lines=folium.PolyLine(locations=[city_Lompoc_coordinates, launch_site_4_coordinates], weight=1)
+site_map.add_child(lines)
+
+# Draw a line between the closest coast to the launch site(Space Launch Complex 4)
+west_coast_lat = 34.63698
+west_coast_lon = -120.6245
+distance_west_coast = calculate_distance(launch_site_4_lat, launch_site_4_lon, west_coast_lat, west_coast_lon)
+
+west_coast_coordinates = [west_coast_lat, west_coast_lon]
+
+distance_marker = folium.Marker(
+    west_coast_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_west_coast),
+        )
+    )
+distance_marker.add_to(site_map)
+
+lines=folium.PolyLine(locations=[west_coast_coordinates, launch_site_4_coordinates], weight=1)
+site_map.add_child(lines)
+
+# Draw a line between the closest railway to the launch site(Space Launch Complex 4)
+railway_4_lat = 34.63677
+railway_4_lon = -120.6236
+distance_railway_4 = calculate_distance(launch_site_4_lat, launch_site_4_lon, railway_4_lat, railway_4_lon)
+
+railway_4_coordinates = [railway_4_lat, railway_4_lon]
+
+distance_marker = folium.Marker(
+    railway_4_coordinates,
+    icon=DivIcon(
+        icon_size=(20,20),
+        icon_anchor=(0,0),
+        html='<div style="font-size: 12; color:#d35400;"><b>%s</b></div>' % "{:10.2f} KM".format(distance_railway_4),
+        )
+    )
+distance_marker.add_to(site_map)
+
+lines=folium.PolyLine(locations=[railway_4_coordinates, launch_site_4_coordinates], weight=1)
+site_map.add_child(lines)
+
+site_map
